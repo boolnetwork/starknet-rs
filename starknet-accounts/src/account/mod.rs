@@ -92,9 +92,9 @@ pub struct Declaration<'a, A> {
 /// [Execution] but with `nonce` and `max_fee` already determined.
 #[derive(Debug)]
 pub struct RawExecution {
-    calls: Vec<Call>,
-    nonce: FieldElement,
-    max_fee: FieldElement,
+    pub calls: Vec<Call>,
+    pub nonce: FieldElement,
+    pub max_fee: FieldElement,
 }
 
 /// [Declaration] but with `nonce` and `max_fee` already determined.

@@ -18,4 +18,4 @@ proc-macro = true
 [dependencies]
 starknet-curve = { version = "0.1.0", path = "../starknet-curve" }
 starknet-ff = { version = "0.2.0", path = "../starknet-ff" }
-syn = "1.0.96"
+syn = "1.0.82"

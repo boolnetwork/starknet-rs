@@ -1,10 +1,14 @@
+#![allow(deprecated)]
+
 use std::str::FromStr;
 
-use starknet_core::types::{
-    AccountTransaction, BlockId, CallL1Handler, FieldElement, InvokeFunctionTransactionRequest,
-    L1Address,
+use starknet_core::types::FieldElement;
+use starknet_providers::{
+    sequencer::models::{
+        AccountTransaction, BlockId, CallL1Handler, InvokeFunctionTransactionRequest, L1Address,
+    },
+    SequencerGatewayProvider,
 };
-use starknet_providers::{Provider, SequencerGatewayProvider};
 
 fn create_sequencer_client() -> SequencerGatewayProvider {
     SequencerGatewayProvider::starknet_alpha_goerli()
@@ -65,7 +69,7 @@ async fn sequencer_goerli_can_simulate_transaction() {
     let simulation = client
         .simulate_transaction(
             AccountTransaction::InvokeFunction(InvokeFunctionTransactionRequest {
-                contract_address: FieldElement::from_hex_be(
+                sender_address: FieldElement::from_hex_be(
                     "0x02643ad267d5f4035c57f33c4b521a539a0525f41ff8e885ce106b47a462ce5c",
                 )
                 .unwrap(),
@@ -127,6 +131,7 @@ async fn sequencer_goerli_can_simulate_transaction() {
                 .unwrap(),
             }),
             BlockId::Latest,
+            false,
         )
         .await
         .unwrap();
@@ -135,6 +140,7 @@ async fn sequencer_goerli_can_simulate_transaction() {
         simulation
             .trace
             .function_invocation
+            .unwrap()
             .execution_resources
             .n_steps
             > 0
@@ -168,7 +174,7 @@ async fn sequencer_goerli_can_bulk_estimate_fee() {
         .estimate_fee_bulk(
             &[
                 AccountTransaction::InvokeFunction(InvokeFunctionTransactionRequest {
-                    contract_address: felt_hex(
+                    sender_address: felt_hex(
                         "0x5b5e9f6f6fb7d2647d81a8b2c2b99cbc9cc9d03d705576d7061812324dca5c0",
                     ),
                     calldata: vec![
@@ -200,7 +206,7 @@ async fn sequencer_goerli_can_bulk_estimate_fee() {
                     nonce: felt_dec("0"),
                 }),
                 AccountTransaction::InvokeFunction(InvokeFunctionTransactionRequest {
-                    contract_address: felt_hex(
+                    sender_address: felt_hex(
                         "0x5b5e9f6f6fb7d2647d81a8b2c2b99cbc9cc9d03d705576d7061812324dca5c0",
                     ),
                     calldata: vec![
@@ -233,6 +239,7 @@ async fn sequencer_goerli_can_bulk_estimate_fee() {
                 }),
             ],
             BlockId::Latest,
+            false,
         )
         .await
         .unwrap();

@@ -4,45 +4,29 @@
 
 ## Benchmark
 
-These results were generated on the author's machine with _AMD Ryzen 9 5950X 16-Core Processor_ running _Ubuntu 20.04.5 LTS_.
+These results were generated on the author's machine with _AMD Ryzen 9 5950X 16-Core Processor_ running _Ubuntu 22.04.1 LTS_.
 
 For instructions on running the benchmarks yourself, check out [this page](../BENCHMARK.md).
 
 ### Native
 
 ```log
-class_hash              time:   [18.931 ms 18.943 ms 18.958 ms]
+class_hash              time:   [21.680 ms 21.684 ms 21.688 ms]
 ```
 
 ### WebAssembly
 
-Runtime versions:
+_(With its excellent wasm performance, results are only provided for Node.js here. Check out the [benchmark page](../BENCHMARK.md) for running the benchmark on other runtimes)._
+
+Runtime version:
 
 ```console
-$ wasmer --version
-wasmer 2.3.0
-$ wasmtime --version
-wasmtime-cli 2.0.2
 $ node --version
-v18.12.1
-$ wasmer-js --version
-wasmer-js 0.4.1
-```
-
-`wasmer` results:
-
-```log
-class_hash              time:   [126.30 ms 126.47 ms 126.65 ms]
-```
-
-`wasmtime` results:
-
-```log
-class_hash              time:   [108.80 ms 109.02 ms 109.24 ms]
+v18.16.0
 ```
 
 Node.js results:
 
 ```log
-class_hash              time:   [113.77 ms 114.36 ms 115.07 ms]
+class_hash              time:   [124.48 ms 124.58 ms 124.69 ms]
 ```

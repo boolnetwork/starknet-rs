@@ -17,9 +17,11 @@ fi
 benches=(
   class_hash
   ecdsa_get_public_key
+  ecdsa_recover
   ecdsa_sign
   ecdsa_verify
   pedersen_hash
+  poseidon_hash
   rfc6979_generate_k
 )
 

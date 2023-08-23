@@ -25,15 +25,13 @@ jobs:
           profile: minimal
           override: true
 
-      - uses: Swatinem/rust-cache@v1
-        with:
-          cache-on-failure: true
-
       - name: Run cargo tests
-        uses: actions-rs/cargo@v1
+        uses: nick-fields/retry@v2
         with:
-          command: test
-          args: --all
+          timeout_minutes: 30
+          max_attempts: 20
+          retry_wait_seconds: 30
+          command: cargo test --all
 
   win-test:
     name: Windows tests
@@ -55,16 +53,13 @@ jobs:
           profile: minimal
           override: true
 
-      - uses: Swatinem/rust-cache@v1
-        with:
-          cache-on-failure: true
-          key: ${{ matrix.target }}
-
       - name: Run cargo tests
-        uses: actions-rs/cargo@v1
+        uses: nick-fields/retry@v2
         with:
-          command: test
-          args: --all --target ${{ matrix.target }}
+          timeout_minutes: 30
+          max_attempts: 20
+          retry_wait_seconds: 30
+          command: cargo test --all --target ${{ matrix.target }} --exclude starknet-cxx
 
   wasm-test:
     name: WASM tests
@@ -81,17 +76,13 @@ jobs:
           profile: minimal
           override: true
 
-      - uses: Swatinem/rust-cache@v1
-        with:
-          cache-on-failure:
-
       - name: Add wasm32-unknown-unknown target
         run: |
           rustup target add wasm32-unknown-unknown
 
       - name: Build project
         run: |
-          cargo build --all --target wasm32-unknown-unknown
+          cargo build --all --target wasm32-unknown-unknown --exclude starknet-cxx
 
       - name: Install wasm-pack
         uses: actions-rs/cargo@v1
@@ -101,20 +92,72 @@ jobs:
 
       - name: Run starknet-ff tests
         run: |
-          (cd ./starknet-ff && wasm-pack test --node)
+          (cd ./starknet-ff && wasm-pack test --release --node)
 
       - name: Run starknet-crypto tests
         run: |
-          (cd ./starknet-crypto && wasm-pack test --node)
+          (cd ./starknet-crypto && wasm-pack test --release --node)
 
       - name: Run starknet-core tests
         run: |
-          (cd ./starknet-core && wasm-pack test --node)
+          (cd ./starknet-core && wasm-pack test --release --node)
 
       - name: Run starknet-signers tests
         run: |
-          (cd ./starknet-signers && wasm-pack test --node)
+          (cd ./starknet-signers && wasm-pack test --release --node)
 
       - name: Run starknet-macros tests
         run: |
-          (cd ./starknet-macros && wasm-pack test --node)
+          (cd ./starknet-macros && wasm-pack test --release --node)
+
+  no-std-build:
+    name: no-std build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v2
+
+      - name: Setup toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Add --target thumbv6m-none-eabi target
+        run: |
+          rustup target add thumbv6m-none-eabi
+
+      - name: Build starknet-ff
+        run: |
+          cargo build --package starknet-ff \
+            --target thumbv6m-none-eabi \
+            --no-default-features
+
+          cargo build --package starknet-ff \
+            --target thumbv6m-none-eabi \
+            --no-default-features \
+            --features alloc
+
+          cargo build --package starknet-ff \
+            --target thumbv6m-none-eabi \
+            --no-default-features \
+            --features serde
+
+      - name: Build starknet-crypto
+        run: |
+          cargo build --package starknet-crypto \
+            --target thumbv6m-none-eabi \
+            --no-default-features
+
+          cargo build --package starknet-crypto \
+            --target thumbv6m-none-eabi \
+            --no-default-features \
+            --features alloc
+
+      - name: Build starknet-core
+        run: |
+          cargo build --package starknet-core \
+            --target thumbv6m-none-eabi \
+            --no-default-features

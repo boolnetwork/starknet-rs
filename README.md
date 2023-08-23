@@ -3,10 +3,10 @@
   <h1 align="center">starknet-rs</h1>
 </p>
 
-**Complete Starknet library in Rust**
+**Complete Starknet library in Rust[™](https://www.reddit.com/r/rust/comments/12e7tdb/rust_trademark_policy_feedback_form/)**
 
-![starknet-version-v0.10.3](https://img.shields.io/badge/Starknet_Version-v0.10.3-2ea44f?logo=ethereum)
-[![jsonrpc-spec-v0.2.1](https://img.shields.io/badge/JSON--RPC-v0.2.1-2ea44f?logo=ethereum)](https://github.com/starkware-libs/starknet-specs/tree/v0.2.1)
+![starknet-version-v0.12.1](https://img.shields.io/badge/Starknet_Version-v0.12.1-2ea44f?logo=ethereum)
+[![jsonrpc-spec-v0.4.0](https://img.shields.io/badge/JSON--RPC-v0.4.0-2ea44f?logo=ethereum)](https://github.com/starkware-libs/starknet-specs/tree/v0.3.0)
 [![linting-badge](https://github.com/xJonathanLEI/starknet-rs/actions/workflows/lint.yaml/badge.svg?branch=master)](https://github.com/xJonathanLEI/starknet-rs/actions/workflows/lint.yaml)
 [![crates-badge](https://img.shields.io/crates/v/starknet.svg)](https://crates.io/crates/starknet)
 
@@ -20,7 +20,7 @@ To use the crate from [crates.io](https://crates.io/crates/starknet), add the fo
 
 ```toml
 [dependencies]
-starknet = "0.2.0"
+starknet = "0.5.0"
 ```
 
 Note that the [crates.io version](https://crates.io/crates/starknet) might be outdated. You may want to use the library directly from GitHub for all the latest features and fixes:
@@ -57,6 +57,10 @@ This workspace contains the following crates:
 
 `starknet-rs` can be used as a WebAssembly module. Check out [this example](./examples/starknet-wasm/).
 
+## Using `starknet-rs` from C++
+
+`starknet-rs` can be used as a dynamic or static library from C++. Check out [this example](./examples/starknet-cxx/).
+
 ## Performance
 
 Benchmark results for native and WebAssembly targets are available for these crates:
@@ -78,15 +82,21 @@ Examples can be found in the [examples folder](./examples):
 
    Make sure your account has some L2 Goerli ETH to pay for the transaction fee. You can use [this faucet](https://faucet.goerli.starknet.io/) to fund your account.
 
-4. [Declare contract on `alpha-goerli` testnet](./examples/declare_contract.rs)
+4. [Declare Cairo 1 contract on `alpha-goerli` testnet](./examples/declare_cairo1_contract.rs)
 
-   Declaring contracts without going through an account (and thus not paying fees) has been deprecated, so please make sure your account has enough L2 Goerli ETH for the fees.
+   Make sure your account has some L2 Goerli ETH to pay for the transaction fee. You can use [this faucet](https://faucet.goerli.starknet.io/) to fund your account.
 
-5. [Query the latest block number with JSON-RPC](./examples/jsonrpc.rs)
+5. [Declare legacy Cairo 0 contract on `alpha-goerli` testnet](./examples/declare_cairo0_contract.rs)
 
-6. [Call a contract view function via sequencer gateway](./examples/sequencer_erc20_balance.rs)
+   Make sure your account has some L2 Goerli ETH to pay for the transaction fee. You can use [this faucet](https://faucet.goerli.starknet.io/) to fund your account.
 
-7. [Deploy an Argent X account to a pre-funded address](./examples/deploy_argent_account.rs)
+6. [Query the latest block number with JSON-RPC](./examples/jsonrpc.rs)
+
+7. [Call a contract view function via sequencer gateway](./examples/sequencer_erc20_balance.rs)
+
+8. [Deploy an Argent X account to a pre-funded address](./examples/deploy_argent_account.rs)
+
+9. [Parsing a JSON-RPC request on the server side](./examples/parse_jsonrpc_request.rs)
 
 ## License
 

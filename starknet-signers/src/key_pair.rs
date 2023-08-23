@@ -1,3 +1,5 @@
+use crypto_bigint::{Encoding, NonZero, U256};
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use starknet_core::{
     crypto::{ecdsa_sign, ecdsa_verify, EcdsaSignError, EcdsaVerifyError, Signature},
     types::FieldElement,
@@ -14,9 +16,81 @@ pub struct VerifyingKey {
     scalar: FieldElement,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, thiserror::Error)]
+pub enum KeystoreError {
+    #[error("invalid path")]
+    InvalidPath,
+    #[error("invalid decrypted secret scalar")]
+    InvalidScalar,
+    #[error(transparent)]
+    Inner(eth_keystore::KeystoreError),
+}
+
 impl SigningKey {
+    /// Generates a new key pair from a cryptographically secure RNG.
+    pub fn from_random() -> Self {
+        const PRIME: NonZero<U256> = NonZero::from_uint(U256::from_be_hex(
+            "0800000000000011000000000000000000000000000000000000000000000001",
+        ));
+
+        let mut rng = StdRng::from_entropy();
+        let mut buffer = [0u8; 32];
+        rng.fill(&mut buffer);
+
+        let random_u256 = U256::from_be_slice(&buffer);
+        let secret_scalar = random_u256.rem(&PRIME);
+
+        // It's safe to unwrap here as we're 100% sure it's not out of range
+        let secret_scalar = FieldElement::from_byte_slice_be(&secret_scalar.to_be_bytes()).unwrap();
+
+        Self { secret_scalar }
+    }
+
     pub fn from_secret_scalar(secret_scalar: FieldElement) -> Self {
         Self { secret_scalar }
+    }
+
+    /// Loads the private key from a Web3 Secret Storage Definition keystore.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn from_keystore<P>(path: P, password: &str) -> Result<Self, KeystoreError>
+    where
+        P: AsRef<std::path::Path>,
+    {
+        let key = eth_keystore::decrypt_key(path, password).map_err(KeystoreError::Inner)?;
+        let secret_scalar =
+            FieldElement::from_byte_slice_be(&key).map_err(|_| KeystoreError::InvalidScalar)?;
+        Ok(Self::from_secret_scalar(secret_scalar))
+    }
+
+    /// Encrypts and saves the private key to a Web3 Secret Storage Definition JSON file.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn save_as_keystore<P>(&self, path: P, password: &str) -> Result<(), KeystoreError>
+    where
+        P: AsRef<std::path::Path>,
+    {
+        // Work around the issue of `eth-keystore` not supporting full path.
+        // TODO: patch or fork `eth-keystore`
+        let mut path = path.as_ref().to_path_buf();
+        let file_name = path
+            .file_name()
+            .ok_or(KeystoreError::InvalidPath)?
+            .to_str()
+            .ok_or(KeystoreError::InvalidPath)?
+            .to_owned();
+        path.pop();
+
+        let mut rng = StdRng::from_entropy();
+        eth_keystore::encrypt_key(
+            path,
+            &mut rng,
+            self.secret_scalar.to_bytes_be(),
+            password,
+            Some(&file_name),
+        )
+        .map_err(KeystoreError::Inner)?;
+
+        Ok(())
     }
 
     pub fn secret_scalar(&self) -> FieldElement {
@@ -28,7 +102,7 @@ impl SigningKey {
     }
 
     pub fn sign(&self, hash: &FieldElement) -> Result<Signature, EcdsaSignError> {
-        ecdsa_sign(&self.secret_scalar, hash)
+        ecdsa_sign(&self.secret_scalar, hash).map(|sig| sig.into())
     }
 }
 

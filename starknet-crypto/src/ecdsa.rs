@@ -1,13 +1,12 @@
 use starknet_curve::{
     curve_params::{EC_ORDER, GENERATOR},
-    AffinePoint,
+    AffinePoint, ProjectivePoint,
 };
 
 use crate::{
     fe_utils::{add_unbounded, bigint_mul_mod_floor, mod_inverse, mul_mod_floor},
-    FieldElement, SignError, VerifyError,
+    FieldElement, RecoverError, SignError, VerifyError,
 };
-use std::fmt;
 
 const ELEMENT_UPPER_BOUND: FieldElement = FieldElement::from_mont([
     18446743986131435553,
@@ -25,13 +24,47 @@ pub struct Signature {
     pub s: FieldElement,
 }
 
-impl fmt::Display for Signature {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+/// Stark ECDSA signature with `v`
+#[derive(Debug)]
+pub struct ExtendedSignature {
+    /// The `r` value of a signature
+    pub r: FieldElement,
+    /// The `s` value of a signature
+    pub s: FieldElement,
+    /// The `v` value of a signature
+    pub v: FieldElement,
+}
+
+impl From<ExtendedSignature> for Signature {
+    fn from(value: ExtendedSignature) -> Self {
+        Self {
+            r: value.r,
+            s: value.s,
+        }
+    }
+}
+
+#[cfg(feature = "signature-display")]
+impl core::fmt::Display for Signature {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         write!(
             f,
             "{}{}",
             hex::encode(self.r.to_bytes_be()),
             hex::encode(self.s.to_bytes_be()),
+        )
+    }
+}
+
+#[cfg(feature = "signature-display")]
+impl core::fmt::Display for ExtendedSignature {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        write!(
+            f,
+            "{}{}{:02x}",
+            hex::encode(self.r.to_bytes_be()),
+            hex::encode(self.s.to_bytes_be()),
+            self.v
         )
     }
 }
@@ -42,7 +75,7 @@ impl fmt::Display for Signature {
 ///
 /// * `private_key`: The private key
 pub fn get_public_key(private_key: &FieldElement) -> FieldElement {
-    (&GENERATOR * &private_key.to_bits_le()).x
+    mul_by_bits(&GENERATOR, private_key).x
 }
 
 /// Computes ECDSA signature given a Stark private key and message hash.
@@ -56,7 +89,7 @@ pub fn sign(
     private_key: &FieldElement,
     message: &FieldElement,
     k: &FieldElement,
-) -> Result<Signature, SignError> {
+) -> Result<ExtendedSignature, SignError> {
     if message >= &ELEMENT_UPPER_BOUND {
         return Err(SignError::InvalidMessageHash);
     }
@@ -64,7 +97,8 @@ pub fn sign(
         return Err(SignError::InvalidK);
     }
 
-    let r = (&GENERATOR * &k.to_bits_le()).x;
+    let full_r = mul_by_bits(&GENERATOR, k);
+    let r = full_r.x;
     if r == FieldElement::ZERO || r >= ELEMENT_UPPER_BOUND {
         return Err(SignError::InvalidK);
     }
@@ -78,17 +112,20 @@ pub fn sign(
         return Err(SignError::InvalidK);
     }
 
-    Ok(Signature { r, s })
+    let v = full_r.y & FieldElement::ONE;
+
+    Ok(ExtendedSignature { r, s, v })
 }
 
-/// Verifies if a signature is valid over a message hash given a Stark public key.
+/// Verifies if a signature is valid over a message hash given a public key. Returns an error
+/// instead of `false` if the public key is invalid.
 ///
 /// ### Arguments
 ///
-/// * `stark_key`: The public key
-/// * `msg_hash`: The message hash
-/// * `r_bytes`: The `r` value of the signature
-/// * `s_bytes`: The `s` value of the signature
+/// * `public_key`: The public key
+/// * `message`: The message hash
+/// * `r`: The `r` value of the signature
+/// * `s`: The `s` value of the signature
 pub fn verify(
     public_key: &FieldElement,
     message: &FieldElement,
@@ -105,7 +142,10 @@ pub fn verify(
         return Err(VerifyError::InvalidS);
     }
 
-    let full_public_key = AffinePoint::from_x(*public_key);
+    let full_public_key = match AffinePoint::from_x(*public_key) {
+        Some(value) => value,
+        None => return Err(VerifyError::InvalidPublicKey),
+    };
 
     let w = mod_inverse(s, &EC_ORDER);
     if w == FieldElement::ZERO || w >= ELEMENT_UPPER_BOUND {
@@ -113,12 +153,63 @@ pub fn verify(
     }
 
     let zw = mul_mod_floor(message, &w, &EC_ORDER);
-    let zw_g = &GENERATOR * &zw.to_bits_le();
+    let zw_g = mul_by_bits(&GENERATOR, &zw);
 
     let rw = mul_mod_floor(r, &w, &EC_ORDER);
-    let rw_q = &full_public_key * &rw.to_bits_le();
+    let rw_q = mul_by_bits(&full_public_key, &rw);
 
     Ok((&zw_g + &rw_q).x == *r || (&zw_g - &rw_q).x == *r)
+}
+
+/// Recovers the public key from a message and (r, s, v) signature parameters
+///
+/// ### Arguments
+///
+/// * `msg_hash`: The message hash
+/// * `r_bytes`: The `r` value of the signature
+/// * `s_bytes`: The `s` value of the signature
+/// * `v_bytes`: The `v` value of the signature
+pub fn recover(
+    message: &FieldElement,
+    r: &FieldElement,
+    s: &FieldElement,
+    v: &FieldElement,
+) -> Result<FieldElement, RecoverError> {
+    if message >= &ELEMENT_UPPER_BOUND {
+        return Err(RecoverError::InvalidMessageHash);
+    }
+    if r == &FieldElement::ZERO || r >= &ELEMENT_UPPER_BOUND {
+        return Err(RecoverError::InvalidR);
+    }
+    if s == &FieldElement::ZERO || s >= &EC_ORDER {
+        return Err(RecoverError::InvalidS);
+    }
+    if v > &FieldElement::ONE {
+        return Err(RecoverError::InvalidV);
+    }
+
+    let mut full_r = AffinePoint::from_x(*r).ok_or(RecoverError::InvalidR)?;
+    if (full_r.y & FieldElement::ONE) != *v {
+        full_r.y = -full_r.y;
+    }
+    let full_rs = mul_by_bits(&full_r, s);
+    let zg = mul_by_bits(&GENERATOR, message);
+
+    let r_inv = mod_inverse(r, &EC_ORDER);
+
+    let rs_zg = &full_rs - &zg;
+
+    let k = mul_by_bits(&rs_zg, &r_inv);
+
+    Ok(k.x)
+}
+
+#[inline(always)]
+fn mul_by_bits(x: &AffinePoint, y: &FieldElement) -> AffinePoint {
+    let x = ProjectivePoint::from_affine_point(x);
+    let y = y.to_bits_le();
+    let z = &x * &y;
+    AffinePoint::from(&z)
 }
 
 #[cfg(test)]
@@ -195,6 +286,28 @@ mod tests {
 
     #[test]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn test_verify_invalid_public_key() {
+        let stark_key = field_element_from_be_hex(
+            "03ee9bffffffffff26ffffffff60ffffffffffffffffffffffffffff004accff",
+        );
+        let msg_hash = field_element_from_be_hex(
+            "0000000000000000000000000000000000000000000000000000000000000002",
+        );
+        let r_bytes = field_element_from_be_hex(
+            "0411494b501a98abd8262b0da1351e17899a0c4ef23dd2f96fec5ba847310b20",
+        );
+        let s_bytes = field_element_from_be_hex(
+            "0405c3191ab3883ef2b763af35bc5f5d15b3b4e99461d70e84c654a351a7c81b",
+        );
+
+        match verify(&stark_key, &msg_hash, &r_bytes, &s_bytes) {
+            Err(VerifyError::InvalidPublicKey) => {}
+            _ => panic!("unexpected result"),
+        }
+    }
+
+    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_sign() {
         let private_key = field_element_from_be_hex(
             "0000000000000000000000000000000000000000000000000000000000000001",
@@ -210,5 +323,46 @@ mod tests {
         let public_key = get_public_key(&private_key);
 
         assert!(verify(&public_key, &message, &signature.r, &signature.s).unwrap());
+    }
+
+    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn test_recover() {
+        let private_key = field_element_from_be_hex(
+            "0000000000000000000000000000000000000000000000000000000000000001",
+        );
+        let message = field_element_from_be_hex(
+            "0000000000000000000000000000000000000000000000000000000000000002",
+        );
+        let k = field_element_from_be_hex(
+            "0000000000000000000000000000000000000000000000000000000000000003",
+        );
+
+        let signature = sign(&private_key, &message, &k).unwrap();
+        let public_key = recover(&message, &signature.r, &signature.s, &signature.v).unwrap();
+
+        assert_eq!(get_public_key(&private_key), public_key);
+    }
+
+    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn test_recover_invalid_r() {
+        let message = field_element_from_be_hex(
+            "0000000000000000000000000000000000000000000000000000000000000002",
+        );
+        let r = field_element_from_be_hex(
+            "03ee9bffffffffff26ffffffff60ffffffffffffffffffffffffffff004accff",
+        );
+        let s = field_element_from_be_hex(
+            "0405c3191ab3883ef2b763af35bc5f5d15b3b4e99461d70e84c654a351a7c81b",
+        );
+        let v = field_element_from_be_hex(
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        );
+
+        match recover(&message, &r, &s, &v) {
+            Err(RecoverError::InvalidR) => {}
+            _ => panic!("unexpected result"),
+        }
     }
 }

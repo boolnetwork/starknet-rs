@@ -1,7 +1,7 @@
-use crate::{Account, ConnectedAccount, RawDeclaration, RawExecution};
+use crate::{Account, ConnectedAccount, RawDeclaration, RawExecution, RawLegacyDeclaration};
 
 use async_trait::async_trait;
-use starknet_core::types::{contract_artifact::ComputeClassHashError, FieldElement};
+use starknet_core::types::{contract::ComputeClassHashError, BlockId, BlockTag, FieldElement};
 use starknet_providers::Provider;
 use starknet_signers::Signer;
 
@@ -15,6 +15,7 @@ where
     signer: S,
     address: FieldElement,
     chain_id: FieldElement,
+    block_id: BlockId,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -36,7 +37,13 @@ where
             signer,
             address,
             chain_id,
+            block_id: BlockId::Tag(BlockTag::Latest),
         }
+    }
+
+    pub fn set_block_id(&mut self, block_id: BlockId) -> &Self {
+        self.block_id = block_id;
+        self
     }
 }
 
@@ -75,7 +82,21 @@ where
         &self,
         declaration: &RawDeclaration,
     ) -> Result<Vec<FieldElement>, Self::SignError> {
-        let tx_hash = declaration
+        let tx_hash = declaration.transaction_hash(self.chain_id, self.address);
+        let signature = self
+            .signer
+            .sign_hash(&tx_hash)
+            .await
+            .map_err(SignError::Signer)?;
+
+        Ok(vec![signature.r, signature.s])
+    }
+
+    async fn sign_legacy_declaration(
+        &self,
+        legacy_declaration: &RawLegacyDeclaration,
+    ) -> Result<Vec<FieldElement>, Self::SignError> {
+        let tx_hash = legacy_declaration
             .transaction_hash(self.chain_id, self.address)
             .map_err(SignError::ClassHash)?;
         let signature = self
@@ -97,5 +118,9 @@ where
 
     fn provider(&self) -> &Self::Provider {
         &self.provider
+    }
+
+    fn block_id(&self) -> BlockId {
+        self.block_id
     }
 }

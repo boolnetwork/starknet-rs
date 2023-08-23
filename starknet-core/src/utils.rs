@@ -1,8 +1,9 @@
+use alloc::string::String;
+
 use crate::{crypto::compute_hash_on_elements, types::FieldElement};
 
 use sha3::{Digest, Keccak256};
 use starknet_crypto::pedersen_hash;
-use thiserror::Error;
 
 const DEFAULT_ENTRY_POINT_NAME: &str = "__default__";
 const DEFAULT_L1_ENTRY_POINT_NAME: &str = "__l1_default__";
@@ -23,25 +24,75 @@ const CONTRACT_ADDRESS_PREFIX: FieldElement = FieldElement::from_mont([
     533439743893157637,
 ]);
 
-#[derive(Debug, Error)]
-#[error("the provided name contains non-ASCII characters")]
-pub struct NonAsciiNameError;
-
-#[derive(Debug, Error)]
-pub enum CairoShortStringToFeltError {
-    #[error("Cairo string can only contain ASCII characters")]
-    NonAsciiCharacter,
-    #[error("short string exceeds maximum length of 31 characters")]
-    StringTooLong,
+/// The uniqueness settings for UDC deployments.
+#[derive(Debug, Clone)]
+pub enum UdcUniqueness {
+    NotUnique,
+    Unique(UdcUniqueSettings),
 }
 
-#[derive(Debug, Error)]
-pub enum ParseCairoShortStringError {
-    #[error("field element value out of range")]
-    ValueOutOfRange,
-    #[error("unexpected null terminator")]
-    UnexpectedNullTerminator,
+#[derive(Debug, Clone)]
+pub struct UdcUniqueSettings {
+    pub deployer_address: FieldElement,
+    pub udc_contract_address: FieldElement,
 }
+
+mod errors {
+    use core::fmt::{Display, Formatter, Result};
+
+    #[derive(Debug)]
+    pub struct NonAsciiNameError;
+
+    #[derive(Debug)]
+    pub enum CairoShortStringToFeltError {
+        NonAsciiCharacter,
+        StringTooLong,
+    }
+
+    #[derive(Debug)]
+    pub enum ParseCairoShortStringError {
+        ValueOutOfRange,
+        UnexpectedNullTerminator,
+    }
+
+    #[cfg(feature = "std")]
+    impl std::error::Error for NonAsciiNameError {}
+
+    impl Display for NonAsciiNameError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+            write!(f, "the provided name contains non-ASCII characters")
+        }
+    }
+
+    #[cfg(feature = "std")]
+    impl std::error::Error for CairoShortStringToFeltError {}
+
+    impl Display for CairoShortStringToFeltError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+            match self {
+                Self::NonAsciiCharacter => {
+                    write!(f, "Cairo string can only contain ASCII characters")
+                }
+                Self::StringTooLong => {
+                    write!(f, "short string exceeds maximum length of 31 characters")
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "std")]
+    impl std::error::Error for ParseCairoShortStringError {}
+
+    impl Display for ParseCairoShortStringError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+            match self {
+                Self::ValueOutOfRange => write!(f, "field element value out of range"),
+                Self::UnexpectedNullTerminator => write!(f, "unexpected null terminator"),
+            }
+        }
+    }
+}
+pub use errors::{CairoShortStringToFeltError, NonAsciiNameError, ParseCairoShortStringError};
 
 /// A variant of eth-keccak that computes a value that fits in a Starknet field element.
 pub fn starknet_keccak(data: &[u8]) -> FieldElement {
@@ -79,7 +130,7 @@ pub fn get_storage_var_address(
         for arg in args.iter() {
             res = pedersen_hash(&res, arg);
         }
-        Ok(res % ADDR_BOUND)
+        Ok(normalize_address(res))
     } else {
         Err(NonAsciiNameError)
     }
@@ -127,19 +178,49 @@ pub fn parse_cairo_short_string(felt: &FieldElement) -> Result<String, ParseCair
     Ok(buffer)
 }
 
+/// Computes the target contract address of a "native" contract deployment. Use
+/// `get_udc_deployed_address` instead if you want to compute the target address for deployments
+/// through the Universal Deployer Contract.
 pub fn get_contract_address(
     salt: FieldElement,
     class_hash: FieldElement,
     constructor_calldata: &[FieldElement],
     deployer_address: FieldElement,
 ) -> FieldElement {
-    compute_hash_on_elements(&[
+    normalize_address(compute_hash_on_elements(&[
         CONTRACT_ADDRESS_PREFIX,
         deployer_address,
         salt,
         class_hash,
         compute_hash_on_elements(constructor_calldata),
-    ]) % ADDR_BOUND
+    ]))
+}
+
+/// Computes the target contract address for deployments through the Universal Deploy Contract.
+pub fn get_udc_deployed_address(
+    salt: FieldElement,
+    class_hash: FieldElement,
+    uniqueness: &UdcUniqueness,
+    constructor_calldata: &[FieldElement],
+) -> FieldElement {
+    match uniqueness {
+        UdcUniqueness::NotUnique => {
+            get_contract_address(salt, class_hash, constructor_calldata, FieldElement::ZERO)
+        }
+        UdcUniqueness::Unique(settings) => {
+            let unique_salt = pedersen_hash(&settings.deployer_address, &salt);
+            get_contract_address(
+                unique_salt,
+                class_hash,
+                constructor_calldata,
+                settings.udc_contract_address,
+            )
+        }
+    }
+}
+
+pub fn normalize_address(address: FieldElement) -> FieldElement {
+    address % ADDR_BOUND
 }
 
 #[cfg(test)]
@@ -346,5 +427,64 @@ mod tests {
             )
             .unwrap()
         )
+    }
+
+    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn test_udc_address_not_unique() {
+        let address = get_udc_deployed_address(
+            FieldElement::from_hex_be(
+                "0x06df0e9a9842d97ff3f4c6de7494d6e69d0a107a72150f9c53d59515b91ed9cb",
+            )
+            .unwrap(),
+            FieldElement::from_hex_be(
+                "0x0562fc1d911530d18a86ea3ef4be50018923898d3c573288c5abb9c2344459ed",
+            )
+            .unwrap(),
+            &UdcUniqueness::NotUnique,
+            &[FieldElement::from_hex_be("0x1234").unwrap()],
+        );
+
+        assert_eq!(
+            FieldElement::from_hex_be(
+                "0x0288e5952d2f2f0e897ea0c5401c6e9f584a89eebfb08b5b26f090a8bbf67eb6",
+            )
+            .unwrap(),
+            address
+        );
+    }
+
+    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn test_udc_address_unique() {
+        let address = get_udc_deployed_address(
+            FieldElement::from_hex_be(
+                "0x01f65976b95bf17ae1cb04afc9fc1eeee26d3e1aaa1f30aa535bf261e4322ab8",
+            )
+            .unwrap(),
+            FieldElement::from_hex_be(
+                "0x0562fc1d911530d18a86ea3ef4be50018923898d3c573288c5abb9c2344459ed",
+            )
+            .unwrap(),
+            &UdcUniqueness::Unique(UdcUniqueSettings {
+                deployer_address: FieldElement::from_hex_be(
+                    "0x00b1461de04c6a1aa3375bdf9b7723a8779c082ffe21311d683a0b15c078b5dc",
+                )
+                .unwrap(),
+                udc_contract_address: FieldElement::from_hex_be(
+                    "0x041a78e741e5af2fec34b695679bc6891742439f7afb8484ecd7766661ad02bf",
+                )
+                .unwrap(),
+            }),
+            &[FieldElement::from_hex_be("0x1234").unwrap()],
+        );
+
+        assert_eq!(
+            FieldElement::from_hex_be(
+                "0x02406943b25942021f213b047c8765e531dddce3b981722f7aeb2ca137e18dbf",
+            )
+            .unwrap(),
+            address
+        );
     }
 }

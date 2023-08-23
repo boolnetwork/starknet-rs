@@ -1,5 +1,6 @@
 use crypto_bigint::{ArrayEncoding, ByteArray, Integer, U256};
-use hmac::digest::{BlockInput, FixedOutput, Reset, Update};
+use hmac::digest::Digest;
+use sha2::digest::{crypto_common::BlockSizeUser, FixedOutputReset, HashMarker};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::FieldElement;
@@ -58,7 +59,7 @@ pub fn generate_k(
 #[inline]
 fn generate_k_shifted<D, I>(x: &I, n: &I, h: &ByteArray<I>, data: &[u8]) -> Zeroizing<I>
 where
-    D: FixedOutput<OutputSize = I::ByteSize> + BlockInput + Clone + Default + Reset + Update,
+    D: Default + Digest + BlockSizeUser + FixedOutputReset + HashMarker,
     I: ArrayEncoding + Integer + Zeroize,
 {
     let mut x = x.to_be_byte_array();
@@ -80,15 +81,17 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::field_element_from_be_hex;
+    #[cfg(not(feature = "std"))]
+    use alloc::vec::Vec;
 
     use serde::Deserialize;
 
     #[derive(Deserialize)]
-    struct Rfc6979TestVecotr {
-        msg_hash: String,
-        priv_key: String,
-        seed: String,
-        k: String,
+    struct Rfc6979TestVecotr<'a> {
+        msg_hash: &'a str,
+        priv_key: &'a str,
+        seed: &'a str,
+        k: &'a str,
     }
 
     #[test]
@@ -109,10 +112,10 @@ mod tests {
         let test_vectors: Vec<Rfc6979TestVecotr> = serde_json::from_str(json_str).unwrap();
 
         for test_vector in test_vectors.iter() {
-            let msg_hash = field_element_from_be_hex(&test_vector.msg_hash);
-            let priv_key = field_element_from_be_hex(&test_vector.priv_key);
-            let seed = field_element_from_be_hex(&test_vector.seed);
-            let expected_k = field_element_from_be_hex(&test_vector.k);
+            let msg_hash = field_element_from_be_hex(test_vector.msg_hash);
+            let priv_key = field_element_from_be_hex(test_vector.priv_key);
+            let seed = field_element_from_be_hex(test_vector.seed);
+            let expected_k = field_element_from_be_hex(test_vector.k);
 
             let k = generate_k(&msg_hash, &priv_key, Some(&seed));
 
